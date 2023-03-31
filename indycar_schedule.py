@@ -20,7 +20,7 @@ def get_html(url):
 
 
 def utc_dt_to_str(utc_dt: datetime.datetime) -> str:
-    return utc_dt.isoformat(timespec='minutes').replace('+00:00', 'Z')
+    return utc_dt.isoformat(timespec='seconds').replace('+00:00', 'Z')
 
 
 def parse_race_info_urls(schedule_html):
