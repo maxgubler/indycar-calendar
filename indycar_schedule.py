@@ -74,7 +74,7 @@ def group_qualifying(qs: list[dict]):
     return grouped_values
 
 
-def clean_sessions(sessions: list[dict]) -> list[dict]:
+def clean_sessions(race_name: str, sessions: list[dict]) -> list[dict]:
     sessions = sorted(sessions, key=lambda x: x['start_dt'])
     qualifying = []
     cleaned = []
@@ -94,7 +94,7 @@ def clean_sessions(sessions: list[dict]) -> list[dict]:
         elif 'quali' in title:
             qualifying.append(session)
         else:
-            raise Exception(f'Unable to parse {title=}')
+            print(f'Unable to parse {title=} for {race_name=}')
     if qualifying:
         grouped_qualifying = group_qualifying(qualifying)
         cleaned += grouped_qualifying
@@ -115,7 +115,7 @@ def parse_race_details(race_info_html):
     race_name = soup.select_one('.title-container').text.strip()
     session_elements = [x.text for x in soup.select('#schedule .race-list__item')]
     sessions = [parse_session(x) for x in session_elements]
-    sessions = clean_sessions(sessions)
+    sessions = clean_sessions(race_name, sessions)
     titles = set([x['title'] for x in sessions])
     if len(sessions) != len(titles):
         raise Exception(f'Duplicate session titles found for {race_name=}: {titles}')
