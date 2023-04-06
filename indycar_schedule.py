@@ -13,7 +13,7 @@ SCHEDULE_URL = f'{BASE_URL}/schedule?year={YEAR}'
 RACE_INFO_TEXT = 'Race Info'
 
 
-def get_html(url):
+def get_html(url: str) -> str:
     response = requests.get(url)
     response.raise_for_status()
     return response.text
@@ -23,7 +23,7 @@ def utc_dt_to_str(utc_dt: datetime.datetime) -> str:
     return utc_dt.isoformat(timespec='seconds').replace('+00:00', 'Z')
 
 
-def parse_race_info_urls(schedule_html):
+def parse_race_info_urls(schedule_html: str) -> list[str]:
     soup = BeautifulSoup(schedule_html, 'html.parser')
     race_links = soup.findAll('a', string=RACE_INFO_TEXT)
     race_info_urls = [BASE_URL + a.attrs['href'] for a in race_links]
@@ -50,7 +50,7 @@ def parse_session(event: str) -> dict:
     return session_details
 
 
-def group_qualifying(qs: list[dict]):
+def group_qualifying(qs: list[dict]) -> list[dict]:
     """Group qualifying sessions if start and end are within an hour"""
     grouped = {}
     group_number = 0
@@ -110,7 +110,7 @@ def transform_sessions(sessions: list[dict]) -> dict:
     return transformed
 
 
-def parse_race_details(race_info_html):
+def parse_race_details(race_info_html: str) -> dict:
     soup = BeautifulSoup(race_info_html, 'html.parser')
     race_name = soup.select_one('.title-container').text.strip()
     session_elements = [x.text for x in soup.select('#schedule .race-list__item')]
