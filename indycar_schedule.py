@@ -11,9 +11,10 @@ BASE_URL = 'https://www.indycar.com'
 YEAR = 2023
 SCHEDULE_URL = f'{BASE_URL}/schedule?year={YEAR}'
 RACE_INFO_TEXT = 'Race Info'
+SPORTSTIMES_JSON_URL = f'https://raw.githubusercontent.com/sportstimes/f1/main/_db/indycar/{YEAR}.json'
 
 
-def get_html(url: str) -> str:
+def get(url: str) -> str:
     response = requests.get(url)
     response.raise_for_status()
     return response.text
@@ -127,24 +128,67 @@ def parse_race_details(race_info_html: str) -> dict:
     return race_details
 
 
-def write(races: list[dict]):
-    data = {'races': races}
+def merge_data(races: list, sportstimes_data: dict) -> dict:
+    st_races = sportstimes_data['races']
+    st_idx_to_date = dict((i, dateparser.parse(race_date).date()) for i, st_race in enumerate(st_races) if (
+        race_date := st_race.get('sessions', {}).get('race')))
+
+    # Match race index to sportstimes race index by date since name may change
+    idx_to_st_idx = {}
+    for i, race in enumerate(races):
+        race_date = dateparser.parse(race['sessions']['race']).date()
+        st_race_idx = next(iter(st_idx for st_idx, st_date in st_idx_to_date.items() if race_date == st_date), None)
+        if st_race_idx is None:
+            print(f'No matching sportstimes race found for {race["name"]} on {race_date}')
+        else:
+            idx_to_st_idx.update({i: st_race_idx})
+
+    # Display any sportstimes race without a match
+    if (st_idx_no_matches := sorted(set([*range(0, len(st_races))]) - set(idx_to_st_idx.values()))):
+        for st_idx in st_idx_no_matches:
+            print(f'No matching race found for existing sportstimes race entry: {json.dumps(st_races[st_idx])}')
+
+    # Merge
+    merged_races = [{
+        **(st_races[st_idx] if (isinstance(st_idx := idx_to_st_idx.get(i), int)) else {}),
+        **race
+    } for i, race in enumerate(races)]
+
+    # Finishing touches
+    for _round, race in enumerate(merged_races, start=1):
+        # Set round by index + 1
+        race['round'] = _round
+        # Set slug and localeKey to lowercase name with non-alpha chars stripped and spaces replaced with hyphen
+        _id = re.sub(r'\s+', '-', ''.join(x if (x.isalnum() or x == ' ') else '' for x in race['name'])).lower()
+        race['slug'] = _id
+        race['localeKey'] = _id
+        # Remove tbc if additional session data is found
+        if len(race['sessions'].keys()) > 1 and 'tbc' in race.keys():
+            del race['tbc']
+
+    merged_data = {**sportstimes_data, 'races': merged_races}
+    return merged_data
+
+
+def write(data: dict):
     os.makedirs('./out', exist_ok=True)
-    year = races[-1]['sessions']['race'][:4]
-    with open(f'./out/{year}.json', 'w') as f:
+    with open(f'./out/{YEAR}.json', 'w') as f:
         json.dump(data, f, indent=4)
 
 
 def main():
-    schedule_html = get_html(SCHEDULE_URL)
+    sportstimes_data = json.loads(get(SPORTSTIMES_JSON_URL))
+    schedule_html = get(SCHEDULE_URL)
     race_info_urls = parse_race_info_urls(schedule_html)
 
     races = []
     for race_info_url in race_info_urls:
-        race_info_html = get_html(race_info_url)
+        race_info_html = get(race_info_url)
         race_details = parse_race_details(race_info_html)
         races += [race_details]
-    write(races)
+    merged_sportstimes_data = merge_data(races, sportstimes_data)
+    write(merged_sportstimes_data)
+    print('Complete!')
 
 
 if __name__ == '__main__':
