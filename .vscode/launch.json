@@ -10,6 +10,13 @@
             "request": "launch",
             "program": "indycar_schedule.py",
             "console": "integratedTerminal"
+        },
+        {
+            "name": "Update Indycar Schedule",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "update.py",
+            "console": "integratedTerminal"
         }
     ]
 }

@@ -1,17 +1,19 @@
+import argparse
 import datetime
 import json
 import os
 import re
+from pathlib import Path
 
 import dateparser
 import requests
 from bs4 import BeautifulSoup
 
 BASE_URL = 'https://www.indycar.com'
-YEAR = 2024
-SCHEDULE_URL = f'{BASE_URL}/schedule?year={YEAR}'
+SCHEDULE_URL_FORMAT = BASE_URL + '/schedule?year={year}'
+CURRENT_YEAR = datetime.datetime.now().year
+DEFAULT_OUTPUT_PATH_FORMAT = 'out/{year}.json'
 RACE_INFO_TEXT = 'Race Info'
-SPORTSTIMES_JSON_URL = f'https://raw.githubusercontent.com/sportstimes/f1/main/_db/indycar/{YEAR}.json'
 
 
 def get(url: str) -> str:
@@ -32,16 +34,16 @@ def parse_race_info_urls(schedule_html: str) -> list[str]:
     return race_info_urls
 
 
-def parse_session(event: str) -> dict:
+def parse_session(event: str, year: int) -> dict:
     event = re.sub(r'\s+\n', '\n', event.strip())
     date, time, session_title = event.split('\n')[:3]
     tz = time.split(' ')[-1]
     if tz.upper() not in ('ET', 'EST', 'EDT'):
         raise Exception(f'Unknown timezone {tz=}')
     start_time, end_time = time.replace(f' {tz}', '').split(' - ')
-    start_dt = dateparser.parse(f'{date} {YEAR} {start_time}', settings={
+    start_dt = dateparser.parse(f'{date} {year} {start_time}', settings={
         'TIMEZONE': 'US/Eastern', 'TO_TIMEZONE': 'UTC', 'RETURN_AS_TIMEZONE_AWARE': True})
-    end_dt = dateparser.parse(f'{date} {YEAR} {end_time}', settings={
+    end_dt = dateparser.parse(f'{date} {year} {end_time}', settings={
         'TIMEZONE': 'US/Eastern', 'TO_TIMEZONE': 'UTC', 'RETURN_AS_TIMEZONE_AWARE': True})
     session_details = {
         'title': session_title,
@@ -144,7 +146,7 @@ def transform_sessions(sessions: list[dict]) -> dict:
     return transformed
 
 
-def parse_race_details(race_info_html: str) -> dict:
+def parse_race_details(race_info_html: str, year: int) -> dict:
     soup = BeautifulSoup(race_info_html, 'html.parser')
     race_name = soup.select_one('.title-container').text.strip()
     session_elements = [x.text for x in soup.select('#schedule .race-list__item')]
@@ -156,7 +158,7 @@ def parse_race_details(race_info_html: str) -> dict:
         broadcast_elements = soup.select('#broadcasts .race-list .race-list__item')
         session_elements[tbd_race_idx] = next(iter(
             x.text for x in broadcast_elements if re.search(r'INDYCAR.*Race|\nRace\s?', x.text, re.IGNORECASE)))
-    sessions = [parse_session(x) for x in session_elements]
+    sessions = [parse_session(session_element, year) for session_element in session_elements]
     cleaned_sessions = clean_sessions(race_name, sessions)
     session_keys = set([x['session_key'] for x in cleaned_sessions])
     if len(cleaned_sessions) != len(session_keys):
@@ -185,14 +187,9 @@ def build_output(races: list) -> dict:
     return output
 
 
-def write(data: dict):
-    os.makedirs('./out', exist_ok=True)
-    with open(f'./out/{YEAR}.json', 'w') as f:
-        json.dump(data, f, indent=4)
-
-
-def main():
-    schedule_html = get(SCHEDULE_URL)
+def get_indycar_schedule(year: int = CURRENT_YEAR) -> dict:
+    schedule_url = SCHEDULE_URL_FORMAT.format(year=year)
+    schedule_html = get(schedule_url)
     race_info_urls = parse_race_info_urls(schedule_html)
 
     races = []
@@ -200,15 +197,37 @@ def main():
         print(f'Handling {race_info_url=}')
         try:
             race_info_html = get(race_info_url)
-            race_details = parse_race_details(race_info_html)
+            race_details = parse_race_details(race_info_html, year)
             races += [race_details]
         except Exception:
             print(f'Exception while handling {race_info_url=}')
             raise
-    output = build_output(races)
-    write(output)
-    print('Complete!')
+    indycar_schedule = build_output(races)
+    return indycar_schedule
+
+
+def write(data: dict, output_path: str | Path) -> None:
+    if isinstance(output_path, str):
+        output_path = Path(output_path)
+    print(f'Writing to {output_path.as_posix()!r}')
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, 'w') as f:
+        json.dump(data, f, indent=4)
+
+
+def main(year: int = CURRENT_YEAR, output_path: str | Path = None) -> None:
+    if isinstance(output_path, str):
+        output_path = Path(output_path)
+    indycar_schedule = get_indycar_schedule(year)
+    if output_path:
+        write(indycar_schedule, output_path)
 
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('--year', type=int, default=CURRENT_YEAR, help='schedule year')
+    parser.add_argument('--output_path', type=Path, default=DEFAULT_OUTPUT_PATH_FORMAT, help='json file path')
+    args = parser.parse_args()
+    if args.output_path == Path(DEFAULT_OUTPUT_PATH_FORMAT):
+        args.output_path = Path(DEFAULT_OUTPUT_PATH_FORMAT.format(year=args.year))
+    main(**vars(args))
