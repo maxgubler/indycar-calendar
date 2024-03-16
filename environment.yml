@@ -1,0 +1,8 @@
+name: indycar-calendar
+channels:
+  - defaults
+dependencies:
+  - pip=23.*
+  - python=3.12.*
+  - pip:
+      - -r requirements.txt

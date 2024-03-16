@@ -1,6 +1,5 @@
 import argparse
 import datetime
-import json
 import os
 import shutil
 from pathlib import Path
@@ -8,28 +7,19 @@ from stat import S_IREAD
 
 from jsondiff import diff
 
-from indycar_schedule import CURRENT_YEAR, DEFAULT_OUTPUT_PATH_FORMAT, get_indycar_schedule, write
+from constants import CURRENT_YEAR, DEFAULT_OUTPUT_PATH_FORMAT
+from helpers import read, write
+from indycar_schedule import get_indycar_schedule
 
 
-def read(file_path: str | Path) -> dict:
-    if isinstance(file_path, str):
-        file_path = Path(file_path)
-    print(f'Reading {file_path.as_posix()!r}')
-    with open(file_path) as f:
-        data = json.load(f)
-    if not isinstance(data, dict):
-        raise ValueError(f'File must parse as a dict {file_path=}')
-    return data
-
-
-def backup_file(source_path: Path) -> str:
+def backup_file(source_path: Path) -> str | None:
     backup_dir = source_path.parent.joinpath('backup')
     last_modified_dt = datetime.datetime.fromtimestamp(source_path.stat().st_mtime)
     last_modified = last_modified_dt.isoformat(timespec='seconds').replace(':', '_')
     backup_file_name = f'{source_path.stem}-{last_modified}{source_path.suffix}'
     backup_path = backup_dir.joinpath(backup_file_name)
     os.makedirs(backup_path.parent, exist_ok=True)
-    if backup_path.is_file and not os.access(backup_path, os.W_OK):
+    if backup_path.is_file and not os.access(backup_path, os.W_OK):  # Check if exists and is read-only
         return
     shutil.copy2(source_path, backup_path)
     backup_path.chmod(S_IREAD)  # Set as read-only
@@ -38,7 +28,7 @@ def backup_file(source_path: Path) -> str:
     return backup_path_posix
 
 
-def main(output_path: str | Path, year: int = CURRENT_YEAR):
+def update_schedule(output_path: str | Path, year: int = CURRENT_YEAR) -> None:
     if isinstance(output_path, str):
         output_path = Path(output_path)
     if not output_path.is_file():
@@ -61,4 +51,4 @@ if __name__ == '__main__':
     args = parser.parse_args()
     if args.output_path == Path(DEFAULT_OUTPUT_PATH_FORMAT):
         args.output_path = Path(DEFAULT_OUTPUT_PATH_FORMAT.format(year=args.year))
-    main(**vars(args))
+    update_schedule(**vars(args))
