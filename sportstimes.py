@@ -1,5 +1,6 @@
 import argparse
 import shutil
+import time
 from functools import cached_property
 from pathlib import Path
 
@@ -86,6 +87,7 @@ def update_sportstimes(source_path: Path):
     if not gh_forked_repo:
         gh_forked_repo = gh_sportstimes_f1_repo.create_fork(
             name=SPORTSTIMES_F1_REPO_NAME.replace('/', '-'), default_branch_only=True)
+        time.sleep(3)
 
     # Ensure forked remote is fetched and is named for the current username
     forked_remote = get_forked_remote(url=gh_forked_repo.clone_url, gh=gh, repo=repo)
