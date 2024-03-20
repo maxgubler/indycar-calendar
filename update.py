@@ -19,7 +19,7 @@ def backup_file(source_path: Path) -> str | None:
     backup_file_name = f'{source_path.stem}-{last_modified}{source_path.suffix}'
     backup_path = backup_dir.joinpath(backup_file_name)
     os.makedirs(backup_path.parent, exist_ok=True)
-    if backup_path.is_file and not os.access(backup_path, os.W_OK):  # Check if exists and is read-only
+    if backup_path.is_file() and not os.access(backup_path, os.W_OK):  # Check if exists and is read-only
         return
     shutil.copy2(source_path, backup_path)
     backup_path.chmod(S_IREAD)  # Set as read-only
