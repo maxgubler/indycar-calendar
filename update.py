@@ -7,7 +7,7 @@ from stat import S_IREAD
 
 from jsondiff import diff
 
-from constants import CURRENT_YEAR, DEFAULT_OUTPUT_PATH_FORMAT
+from constants import CURRENT_YEAR, DEBUG_NEW_SCHEDULE_PATH, DEFAULT_OUTPUT_PATH_FORMAT
 from helpers import read, write
 from indycar_schedule import get_indycar_schedule
 
@@ -28,7 +28,7 @@ def backup_file(source_path: Path) -> str | None:
     return backup_path_posix
 
 
-def update_schedule(output_path: str | Path, year: int = CURRENT_YEAR) -> None:
+def update_schedule(output_path: str | Path, year: int = CURRENT_YEAR) -> Path | None:
     if isinstance(output_path, str):
         output_path = Path(output_path)
     if not output_path.is_file():
@@ -36,12 +36,16 @@ def update_schedule(output_path: str | Path, year: int = CURRENT_YEAR) -> None:
     backup_file(output_path)
     old_schedule = read(output_path)
     print(f'Getting Indycar schedule for {year=}')
-    new_schedule = get_indycar_schedule(year)
-    if diff(old_schedule, new_schedule):
-        print('Changes found: Updating schedule')
-        write(new_schedule, output_path)
+    if DEBUG_NEW_SCHEDULE_PATH:
+        new_schedule = read(DEBUG_NEW_SCHEDULE_PATH)
     else:
+        new_schedule = get_indycar_schedule(year)
+    if not diff(old_schedule, new_schedule):
         print('No changes found')
+        return
+    print('Changes found: Updating schedule')
+    write(new_schedule, output_path)
+    return output_path
 
 
 if __name__ == '__main__':

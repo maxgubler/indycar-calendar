@@ -17,6 +17,14 @@
             "request": "launch",
             "program": "update.py",
             "console": "integratedTerminal"
+        },
+        {
+            "name": "Update sportstimes/f1",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "sportstimes.py",
+            "console": "integratedTerminal",
+            "justMyCode": false
         }
     ]
 }

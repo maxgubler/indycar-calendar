@@ -2,7 +2,7 @@ name: indycar-calendar
 channels:
   - defaults
 dependencies:
-  - pip=23.*
-  - python=3.12.*
+  - pip>=23.3.1
+  - python>=3.12.2
   - pip:
       - -r requirements.txt
