@@ -28,6 +28,33 @@ def backup_file(source_path: Path) -> str | None:
     return backup_path_posix
 
 
+def retain_past_deleted_sessions(old_schedule: dict, new_schedule: dict) -> dict:
+    """Set new_schedule race value to old_schedule if the only change is session deletion in the past"""
+    new_schedule = new_schedule.copy()
+    races_diff = diff(old_schedule, new_schedule, syntax='symmetric').get('races', {})
+    past_deleted_sessions = []
+    for idx, val in races_diff.items():
+        try:
+            if (not isinstance(idx, int)) or (not isinstance(val, dict)) or (
+                    not set(val) == {'sessions'}) or (not getattr(list(val['sessions'])[0], 'label', None) == 'delete'):
+                break
+            deleted_values = list(val['sessions'].values())[0]
+            if not isinstance(deleted_values, dict):
+                break
+            deleted_times = list(deleted_values.values())
+            all_in_past = all(iter(datetime.datetime.fromisoformat(x) < datetime.datetime.now(
+                tz=datetime.timezone.utc) for x in deleted_times))
+            if all_in_past:
+                past_deleted_sessions += [idx]
+        except Exception:
+            break
+    for idx in past_deleted_sessions:
+        name = new_schedule['races'][idx].get('name', '')
+        print(f'Ignoring past deleted session(s) for race {idx=} {name=}')
+        new_schedule['races'][idx] = old_schedule['races'][idx]
+    return new_schedule
+
+
 def update_schedule(output_path: str | Path, year: int = CURRENT_YEAR) -> Path | None:
     if isinstance(output_path, str):
         output_path = Path(output_path)
@@ -35,14 +62,20 @@ def update_schedule(output_path: str | Path, year: int = CURRENT_YEAR) -> Path |
         raise FileNotFoundError(f'Unable to find existing file to update {output_path!r}')
     backup_file(output_path)
     old_schedule = read(output_path)
+
     print(f'Getting Indycar schedule for {year=}')
     if DEBUG_NEW_SCHEDULE_PATH:
         new_schedule = read(DEBUG_NEW_SCHEDULE_PATH)
     else:
         new_schedule = get_indycar_schedule(year)
+
+    # Handle case where Indycar has deleted past sessions from their website
+    new_schedule = retain_past_deleted_sessions(old_schedule, new_schedule)
+
     if not diff(old_schedule, new_schedule):
         print('No changes found')
         return
+
     print('Changes found: Updating schedule')
     write(new_schedule, output_path)
     return output_path
