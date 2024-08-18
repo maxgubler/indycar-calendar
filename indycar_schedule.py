@@ -104,10 +104,10 @@ def clean_sessions(race_name: str, sessions: list[dict]) -> list[dict]:
         elif 'warmup' in lower_title:
             session['session_key'] = 'warmup'
             cleaned.append(session)
-        elif 'race' in lower_title:
-            races.append(session)
         elif 'quali' in lower_title:
             qualis.append(session)
+        elif 'race' in lower_title:
+            races.append(session)
         else:
             print(f'WARNING: Unable to parse a session key from {title=} for {race_name=}')
             session['session_key'] = title
