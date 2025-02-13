@@ -1,5 +1,6 @@
 import argparse
 import datetime
+import json
 import re
 from pathlib import Path
 
@@ -196,6 +197,8 @@ def main(year: int = CURRENT_YEAR, output_path: str | Path = None) -> None:
     indycar_schedule = get_indycar_schedule(year)
     if output_path:
         write(indycar_schedule, output_path)
+    else:
+        print(json.dumps(indycar_schedule, indent=4))
 
 
 if __name__ == '__main__':

@@ -8,7 +8,7 @@ Run `sportstimes.py` as a recurring job / task for the complete flow and continu
 
 ## Config
 
-Set `GITHUB_API_KEY` in `.env` file to use `sportstimes.py`
+Set `GITHUB_API_KEY` (classic personal access token) in `.env` file to use `sportstimes.py`
 
 Optional / used for debug:
 

@@ -12,7 +12,8 @@ from github.Issue import Issue
 from constants import (AUTOMATION_BRANCH_NAME, COMMIT_MESSAGE, CURRENT_YEAR, DEFAULT_OUTPUT_PATH_FORMAT, GITHUB_API_KEY,
                        LOCAL_REPO_PATH, LOCAL_REPO_SCHEDULE_DIR_PATH, PULL_REQUEST_BODY, SPORTSTIMES_F1_REPO_NAME,
                        SPORTSTIMES_F1_REPO_URL)
-from helpers import delete
+from helpers import delete, write
+from indycar_schedule import get_indycar_schedule
 from update import update_schedule
 
 
@@ -31,6 +32,11 @@ class AuthenticatedGithub(Github):
         return auth_remote_url
 
 
+def unlock_git_config():
+    """Ensure config is not unecessarily locked"""
+    LOCAL_REPO_PATH.joinpath('.git', 'config.lock').unlink(missing_ok=True)
+
+
 def get_open_pr(gh: Github) -> Issue:
     # TODO: Specifically look for automated indycar pull request
     prs = gh.search_issues(query=f'repo:{SPORTSTIMES_F1_REPO_NAME} author:@me type:pr state:open')
@@ -40,25 +46,31 @@ def get_open_pr(gh: Github) -> Issue:
 
 def get_local_repo(gh: Github) -> git.Repo:
     """Return the local repo and clone if necessary"""
+    origin_url = gh.build_remote_url(SPORTSTIMES_F1_REPO_URL)
     try:
         repo = git.Repo(LOCAL_REPO_PATH)
         if SPORTSTIMES_F1_REPO_NAME not in next(repo.remotes.origin.urls):
             del repo
             print(f'Warning: Origin did not contain {SPORTSTIMES_F1_REPO_NAME=}')
             raise git.InvalidGitRepositoryError
+        # Reset the remote url in case auth changed
+        unlock_git_config()
+        repo.remotes.origin.set_url(origin_url)
     except (git.NoSuchPathError, git.InvalidGitRepositoryError):
         if LOCAL_REPO_PATH.exists():
             delete(LOCAL_REPO_PATH)
-        origin_url = gh.build_remote_url(SPORTSTIMES_F1_REPO_URL)
         repo = git.Repo.clone_from(origin_url, LOCAL_REPO_PATH, single_branch=True, no_tags=True)
     return repo
 
 
 def get_forked_remote(url: str, gh: AuthenticatedGithub, repo: git.Repo) -> git.Remote:
-    if not (forked_remote := getattr(repo.remotes, gh.user.login, None)):
-        forked_remote_url = gh.build_remote_url(url)
+    forked_remote_url = gh.build_remote_url(url)
+    if (forked_remote := getattr(repo.remotes, gh.user.login, None)):
+        # Rebuild the remote url in case auth changed
+        unlock_git_config()
+        forked_remote.set_url(forked_remote_url)
+    else:
         forked_remote = repo.create_remote(name=gh.user.login, url=forked_remote_url)  # Set remote name to username
-    # TODO: Update remote url if it does not match (ex: after switching fork source)
     return forked_remote
 
 
@@ -92,6 +104,8 @@ def update_sportstimes(source_path: Path):
     # Ensure forked remote is fetched and is named for the current username
     forked_remote = get_forked_remote(url=gh_forked_repo.clone_url, gh=gh, repo=repo)
     forked_remote.fetch()
+    # Sync main with fork
+    forked_remote.push(force=True)
 
     # Check for an open pull request
     open_pr = get_open_pr(gh)
@@ -121,7 +135,9 @@ def update_sportstimes(source_path: Path):
     if hasattr(forked_remote.refs, AUTOMATION_BRANCH_NAME):
         forked_remote.pull(AUTOMATION_BRANCH_NAME)
 
-    # TODO: Merge main if behind
+    # Merge main if behind
+    if repo.is_ancestor(local_auto_branch, main) and local_auto_branch.commit != main.commit:
+        repo.git.merge(main)
 
     # Copy the updated schedule year json file into the repo
     local_repo_schedule_path = LOCAL_REPO_SCHEDULE_DIR_PATH.joinpath(source_path.name)
@@ -138,7 +154,7 @@ def update_sportstimes(source_path: Path):
     forked_remote.push()
 
     # Track branch on forked remote
-    LOCAL_REPO_PATH.joinpath('.git', 'config.lock').unlink(missing_ok=True)  # Ensure config is not unecessarily locked
+    unlock_git_config()
     local_auto_branch.set_tracking_branch(forked_remote.refs[AUTOMATION_BRANCH_NAME])
 
     # Create pull request if needed
@@ -153,9 +169,12 @@ def update_sportstimes(source_path: Path):
 
 
 def main(output_path: str | Path, year: int = CURRENT_YEAR):
-    output_path = update_schedule(output_path, year)
-    if output_path:
-        update_sportstimes(output_path)
+    try:
+        output_path = update_schedule(output_path, year)
+    except FileNotFoundError:
+        indycar_schedule = get_indycar_schedule(year)
+        write(indycar_schedule, output_path)
+    update_sportstimes(output_path)
 
 
 if __name__ == '__main__':
