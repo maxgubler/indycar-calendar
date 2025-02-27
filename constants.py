@@ -12,6 +12,12 @@ SCHEDULE_URL_FORMAT = BASE_URL + '/schedule?year={year}'
 CURRENT_YEAR = datetime.datetime.now().year
 DEFAULT_OUTPUT_PATH_FORMAT = 'out/{year}.json'
 RACE_INFO_TEXT = 'Race Info'
+SESSION_ID_MAP = {
+    'q1': 'qualifying',
+    'p1': 'practice1',
+    'p2': 'practice2',
+    'p3': 'practice3'
+}
 
 # Use existing output to avoid fetching / parsing while debugging the update / sportstimes
 DEBUG_NEW_SCHEDULE_PATH = os.getenv('DEBUG_NEW_SCHEDULE_PATH')
