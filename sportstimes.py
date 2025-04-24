@@ -172,7 +172,7 @@ def main(output_path: str | Path, year: int = CURRENT_YEAR):
     try:
         output_path = update_schedule(output_path, year)
     except FileNotFoundError:
-        indycar_schedule = get_indycar_schedule(year)
+        indycar_schedule = get_indycar_schedule()
         write(indycar_schedule, output_path)
     if output_path:
         update_sportstimes(output_path)

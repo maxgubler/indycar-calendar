@@ -3,10 +3,21 @@ import json
 import os
 import shutil
 import stat
+import time
 from pathlib import Path
 from typing import Any, Callable
 
 import requests
+
+USER_AGENT = ' '.join([
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+    'AppleWebKit/537.36 (KHTML, like Gecko)',
+    'Chrome/135.0.0.0',
+    'Safari/537.36'
+])
+DEFAULT_HEADERS = {
+    'User-Agent': USER_AGENT
+}
 
 
 def read(file_path: str | Path) -> dict:
@@ -29,9 +40,10 @@ def write(data: dict, output_path: str | Path) -> None:
         json.dump(data, f, indent=2)
 
 
-def get(url: str) -> str:
-    response = requests.get(url)
+def get(url: str, params: dict = {}, sleep: int | float = 0) -> str:
+    response = requests.get(url, params=params, headers=DEFAULT_HEADERS)
     response.raise_for_status()
+    time.sleep(sleep)
     return response.text
 
 

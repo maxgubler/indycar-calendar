@@ -9,14 +9,14 @@ from jsondiff import diff
 
 from constants import CURRENT_YEAR, DEBUG_NEW_SCHEDULE_PATH, DEFAULT_OUTPUT_PATH_FORMAT
 from helpers import read, write
-from indycar_schedule import get_indycar_schedule
+from indycar_schedule import get_indycar_schedule, get_indycar_schedule_old
 
 
 def backup_file(source_path: Path) -> str | None:
     backup_dir = source_path.parent.joinpath('backup')
     last_modified_dt = datetime.datetime.fromtimestamp(source_path.stat().st_mtime)
     last_modified = last_modified_dt.isoformat(timespec='seconds').replace(':', '_')
-    backup_file_name = f'{source_path.stem}-{last_modified}{source_path.suffix}'
+    backup_file_name = f'{source_path.stem}-{last_modified}{source_path.suffix}'  # {source file name}-{bak timestamp}
     backup_path = backup_dir.joinpath(backup_file_name)
     os.makedirs(backup_path.parent, exist_ok=True)
     if backup_path.is_file() and not os.access(backup_path, os.W_OK):  # Check if exists and is read-only
@@ -67,7 +67,10 @@ def update_schedule(output_path: str | Path, year: int = CURRENT_YEAR) -> Path |
     if DEBUG_NEW_SCHEDULE_PATH:
         new_schedule = read(DEBUG_NEW_SCHEDULE_PATH)
     else:
-        new_schedule = get_indycar_schedule(year)
+        if year == CURRENT_YEAR:
+            new_schedule = get_indycar_schedule()
+        else:
+            new_schedule = get_indycar_schedule_old(year)
 
     # Handle case where Indycar has deleted past sessions from their website
     new_schedule = retain_past_deleted_sessions(old_schedule, new_schedule)
