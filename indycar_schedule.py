@@ -224,7 +224,7 @@ def get_indycar_schedule() -> dict:
 
     events = []
     for month_overview in months_overview:
-        print(f"Fetching events for {month_overview['title']}: {month_overview['uri']}")
+        print(f"Fetching events for {month_overview['title']}: {month_overview['uri']}&apikey={api_key}")
         month = json.loads(get(month_overview['uri'], {'apikey': api_key}, sleep=0.5))
         # Example month (month_overview['uri'] = 'https://api.foxsports.com/bifrost/v1/nascar/league/scores-segment/202503?groupId=6')
         # {
@@ -316,7 +316,9 @@ def get_indycar_schedule() -> dict:
 
     races = []
     for event in events:
-        print(f'Handling event: {json.dumps(event)}')
+        event_for_print = dict(
+            (key, f'{val}?apikey={api_key}') if key == 'dataUrl' else (key, val) for key, val in event.items())
+        print(f'Handling event: {json.dumps(event_for_print)}')
         try:
             race_info = json.loads(get(event['dataUrl'], {'apikey': api_key}, sleep=0.5))
             race_name = race_info['header']['title']
