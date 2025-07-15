@@ -192,6 +192,70 @@ def get_indycar_schedule_old(year: int) -> dict:
     return indycar_schedule
 
 
+def get_race_details_from_data_url(event: dict[str, str], api_key: str) -> dict[str, str]:
+    event_for_print = dict(
+        (key, f'{val}?apikey={api_key}') if key == 'dataUrl' else (key, val) for key, val in event.items() if (
+            key in ("id", "title", "webUrl", "dataUrl"))
+    )
+    print(f'Handling: {json.dumps(event_for_print)}')
+    race_info = json.loads(get(event['dataUrl'], {'apikey': api_key}, sleep=0.5))
+    race_name = race_info['header']['title']
+
+    sessions = {}
+    # Add the sessions leading up to the race
+    for session in race_info['leaderboard']['leaderboardSections']:
+        # Map id to our desired key and fallback to use their session id
+        session_key = SESSION_ID_MAP.get(session['id'], session['id'])
+        sessions.update({
+            session_key: utc_dt_to_str(
+                dateparser.parse(session['eventTime'], settings={'RETURN_AS_TIMEZONE_AWARE': True}))
+        })
+    # Add the race session from the eventTime
+    sessions.update({
+        'race': utc_dt_to_str(
+            dateparser.parse(race_info['header']['eventTime'], settings={'RETURN_AS_TIMEZONE_AWARE': True}))
+    })
+    # Sort sessions by datetime
+    sessions = dict(sorted(sessions.items(), key=lambda x: x[1]))
+
+    is_tba = race_info['header'].get('isTba', False)
+
+    race_details = {
+        'name': race_name,
+        'sessions': sessions,
+        'tbc': is_tba
+    }
+    return race_details
+
+
+def get_race_details_from_matchup_url(event: dict[str, str], api_key: str) -> dict[str, str]:
+    event_for_print = dict(
+        (key, f'{val}?apikey={api_key}') if key == 'matchupUrl' else (key, val) for key, val in event.items() if (
+            key in ("id", "title", "webUrl", "matchupUrl"))
+    )
+    print(f'Handling: {json.dumps(event_for_print)}')
+    race_info = json.loads(get(event['matchupUrl'], {'apikey': api_key}, sleep=0.5))
+
+    sessions = {}
+    # Add the sessions leading up to the race
+    for session in race_info['eventSchedule']['scheduleItems']:
+        # Map id to our desired key and fallback to use their session id
+        session_key = SESSION_ID_MAP.get(session['id'], session['id'])
+        sessions.update({
+            session_key: utc_dt_to_str(
+                dateparser.parse(session['eventTime'], settings={'RETURN_AS_TIMEZONE_AWARE': True}))
+        })
+    # Sort sessions by datetime
+    sessions = dict(sorted(sessions.items(), key=lambda x: x[1]))
+
+    race_details = {
+        'name': event['title'],
+        'sessions': sessions,
+        'tbc': False
+    }
+    return race_details
+
+
 def get_indycar_schedule() -> dict:
     # Get API key
     events_html = get('https://www.foxsports.com/motor/indycar/events')
@@ -306,62 +370,35 @@ def get_indycar_schedule() -> dict:
                 'id': event_id,
                 'title': section['events'][0]['title'],
                 'webUrl': 'https://www.foxsports.com' + section['events'][0]['entityLink']['webUrl'],
-                'dataUrl': f'https://api.foxsports.com/bifrost/v1/nascar/event/{event_id}/data'
+                # Data endpoint has simpler event data and has not been very reliable
+                'dataUrl': f'https://api.foxsports.com/bifrost/v1/nascar/event/{event_id}/data',
+                # Matchup has races alongside practice, qualifying, may split long sessions by network (FS1, FS2, FOX)
+                'matchupUrl': f'https://api.foxsports.com/bifrost/v1/nascar/event/{event_id}/matchup'
             }
-            # Event Details
-            # https://api.foxsports.com/bifrost/v1/nascar/event/{id}/data
-            # Alternative (specifically includes races alongside practice and qualifying)
-            # https://api.foxsports.com/bifrost/v1/nascar/event/{id}/matchup
             events.append(event)
 
     races = []
     for event in events:
-        event_for_print = dict(
-            (key, f'{val}?apikey={api_key}') if key == 'dataUrl' else (key, val) for key, val in event.items())
-        print(f'Handling event: {json.dumps(event_for_print)}')
-        try:
-            race_info = json.loads(get(event['dataUrl'], {'apikey': api_key}, sleep=0.5))
-            race_name = race_info['header']['title']
-
-            sessions = {}
-            # Add the sessions leading up to the race
-            for session in race_info['leaderboard']['leaderboardSections']:
-                # Map id to our desired key and fallback to use their session id
-                session_key = SESSION_ID_MAP.get(session['id'], session['id'])
-                sessions.update({
-                    session_key: utc_dt_to_str(
-                        dateparser.parse(session['eventTime'], settings={'RETURN_AS_TIMEZONE_AWARE': True}))
-                })
-            # Add the race session from the eventTime
-            sessions.update({
-                'race': utc_dt_to_str(
-                    dateparser.parse(race_info['header']['eventTime'], settings={'RETURN_AS_TIMEZONE_AWARE': True}))
-            })
-            # Sort sessions by datetime
-            sessions = dict(sorted(sessions.items(), key=lambda x: x[1]))
-
-            is_tba = race_info['header'].get('isTba', False)
-            race_details = {
-                'name': race_name,
-                'sessions': sessions,
-                'tbc': is_tba
-            }
-            races += [race_details]
-        except Exception:
-            print(f'Exception while handling {json.dumps(event)=}')
-            raise
+        # The dataUrl has been failing for later races
+        # try:
+        #     race_details = get_race_details_from_data_url(event, api_key)
+        # except Exception as e:
+        #     print(f'Exception while handling {event["dataUrl"]!r}: {e!r}')
+        #     print("Retrying with matchup url")
+        race_details = get_race_details_from_matchup_url(event, api_key)
+        races += [race_details]
     indycar_schedule = build_output(races)
     return indycar_schedule
 
 
 def main(year: int = CURRENT_YEAR, output_path: str | Path = None) -> None:
+    if year < 2025:
+        raise Exception(f"Use old_indycar_schedule.py for {year=}")
+
     if isinstance(output_path, str):
         output_path = Path(output_path)
 
-    if year == CURRENT_YEAR:
-        indycar_schedule = get_indycar_schedule()
-    else:
-        indycar_schedule = get_indycar_schedule_old(year)
+    indycar_schedule = get_indycar_schedule()
 
     if output_path:
         write(indycar_schedule, output_path)
