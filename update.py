@@ -9,7 +9,8 @@ from jsondiff import diff
 
 from constants import CURRENT_YEAR, DEBUG_NEW_SCHEDULE_PATH, DEFAULT_OUTPUT_PATH_FORMAT
 from helpers import read, write
-from indycar_schedule import get_indycar_schedule, get_indycar_schedule_old
+from indycar_schedule import get_indycar_schedule
+from old_indycar_schedule import get_indycar_schedule as get_indycar_schedule_old
 
 
 def backup_file(source_path: Path) -> str | None:
@@ -67,7 +68,7 @@ def update_schedule(output_path: str | Path, year: int = CURRENT_YEAR) -> Path |
     if DEBUG_NEW_SCHEDULE_PATH:
         new_schedule = read(DEBUG_NEW_SCHEDULE_PATH)
     else:
-        if year == CURRENT_YEAR:
+        if year >= 2025:
             new_schedule = get_indycar_schedule()
         else:
             new_schedule = get_indycar_schedule_old(year)

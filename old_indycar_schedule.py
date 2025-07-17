@@ -7,8 +7,7 @@ from pathlib import Path
 import dateparser
 from bs4 import BeautifulSoup
 
-from constants import (BASE_URL, CURRENT_YEAR, DEFAULT_OUTPUT_PATH_FORMAT, RACE_INFO_TEXT, SCHEDULE_URL_FORMAT,
-                       SESSION_ID_MAP)
+from constants import BASE_URL, CURRENT_YEAR, DEFAULT_OUTPUT_PATH_FORMAT, RACE_INFO_TEXT, SCHEDULE_URL_FORMAT
 from helpers import get, utc_dt_to_str, write
 
 

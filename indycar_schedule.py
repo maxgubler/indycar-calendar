@@ -1,161 +1,14 @@
 import argparse
-import datetime
 import json
 import re
+from itertools import groupby
 from pathlib import Path
 
 import dateparser
 from bs4 import BeautifulSoup
 
-from constants import (BASE_URL, CURRENT_YEAR, DEFAULT_OUTPUT_PATH_FORMAT, RACE_INFO_TEXT, SCHEDULE_URL_FORMAT,
-                       SESSION_ID_MAP)
+from constants import CURRENT_YEAR, SESSION_ID_MAP
 from helpers import get, utc_dt_to_str, write
-
-
-def parse_race_info_urls(schedule_html: str) -> list[str]:
-    soup = BeautifulSoup(schedule_html, 'html.parser')
-    race_links = soup.findAll('a', string=RACE_INFO_TEXT)
-    race_info_urls = [BASE_URL + a.attrs['href'] for a in race_links]
-    race_info_urls = list(dict.fromkeys(race_info_urls))  # remove potential duplicates
-    return race_info_urls
-
-
-def parse_session(event: str, year: int) -> dict:
-    event = re.sub(r'\s+\n', '\n', event.strip())
-    date, time, session_title = event.split('\n')[:3]
-    tz = time.split(' ')[-1]
-    if tz.upper() not in ('ET', 'EST', 'EDT'):
-        raise Exception(f'Unknown timezone {tz=}')
-    start_time, end_time = time.replace(f' {tz}', '').split(' - ')
-    start_dt = dateparser.parse(f'{date} {year} {start_time}', settings={
-        'TIMEZONE': 'US/Eastern', 'TO_TIMEZONE': 'UTC', 'RETURN_AS_TIMEZONE_AWARE': True})
-    end_dt = dateparser.parse(f'{date} {year} {end_time}', settings={
-        'TIMEZONE': 'US/Eastern', 'TO_TIMEZONE': 'UTC', 'RETURN_AS_TIMEZONE_AWARE': True})
-    session_details = {
-        'title': session_title,
-        'start_dt': start_dt,
-        'end_dt': end_dt
-    }
-    return session_details
-
-
-def group_qualifying(qualis: list[dict]) -> list[dict]:
-    """Group qualifying sessions if start and end are within an hour"""
-    grouped = {}
-    group_number = 0
-    for i in range(len(qualis)):
-        end_dt = qualis[i]['end_dt']
-        if i > 0 and (qualis[i]['start_dt'] - qualis[i-1]['end_dt']) < datetime.timedelta(hours=1):
-            start_dt = grouped.get(group_number, qualis[i-1])['start_dt']
-        else:
-            start_dt = qualis[i]['start_dt']
-            group_number += 1
-        grouped.update({
-            group_number: {
-                'session_key': f'qualifying{group_number}',
-                'start_dt': start_dt,
-                'end_dt': end_dt
-            }
-        })
-    grouped_values = list(grouped.values())
-    if len(grouped_values) == 1:
-        grouped_values[0]['title'] = 'Qualifying'
-        grouped_values[0]['session_key'] = 'qualifying'
-    return grouped_values
-
-
-def group_races(races: list[dict]) -> list[dict]:
-    """Group race sessions if start and end are within an hour. Handle special multi-race event."""
-    grouped = {}
-    group_number = 0
-    for i in range(len(races)):
-        end_dt = races[i]['end_dt']
-        if i > 0 and (races[i]['start_dt'] - races[i-1]['end_dt']) < datetime.timedelta(hours=1):
-            start_dt = grouped.get(group_number, races[i-1])['start_dt']
-        else:
-            start_dt = races[i]['start_dt']
-            group_number += 1
-        grouped.update({
-            group_number: {
-                'session_key': f'race{group_number}',
-                'start_dt': start_dt,
-                'end_dt': end_dt
-            }
-        })
-    grouped_values = list(grouped.values())
-    if len(grouped_values) == 1:
-        grouped_values[0]['title'] = 'Race'
-        grouped_values[0]['session_key'] = 'race'
-    return grouped_values
-
-
-def clean_sessions(race_name: str, sessions: list[dict]) -> list[dict]:
-    """Return sessions with session_key based on session title"""
-    sorted_sessions = sorted(sessions, key=lambda x: x['start_dt'])
-    qualis = []
-    races = []
-    cleaned = []
-    practice_number = 1
-    for session in sorted_sessions:
-        title = session['title']
-        lower_title = title.lower()
-        if 'practice' in lower_title:
-            session['session_key'] = f'practice{practice_number}'
-            practice_number += 1
-            cleaned.append(session)
-        elif 'warmup' in lower_title:
-            session['session_key'] = 'warmup'
-            cleaned.append(session)
-        elif 'quali' in lower_title:
-            qualis.append(session)
-        elif 'race' in lower_title:
-            races.append(session)
-        else:
-            print(f'WARNING: Unable to parse a session key from {title=} for {race_name=}')
-            session['session_key'] = title
-            cleaned.append(session)
-    if qualis:
-        grouped_qualifying = group_qualifying(qualis)
-        cleaned += grouped_qualifying
-    if races:
-        grouped_races = group_races(races)
-        cleaned += grouped_races
-    cleaned = sorted(cleaned, key=lambda x: x['start_dt'])
-    return cleaned
-
-
-def transform_sessions(sessions: list[dict]) -> dict:
-    transformed = {}
-    for s in sessions:
-        start = utc_dt_to_str(s['start_dt'])
-        transformed.update({s['session_key']: start})
-    return transformed
-
-
-def parse_race_details(race_info_html: str, year: int) -> dict:
-    soup = BeautifulSoup(race_info_html, 'html.parser')
-    race_name = soup.select_one('.title-container').text.strip()
-    session_elements = [x.text for x in soup.select('#schedule .race-list__item')]
-    # Try to use broadcast if race is TBD in the session element
-    tbd_race_idx = next(iter(i for i, x in enumerate(session_elements) if re.search(r'TBD\s+Race', x)), None)
-    is_tbd = isinstance(tbd_race_idx, int)
-    if is_tbd:
-        print(f'WARNING: Found TBD race in session elements. Attempting to use broadcast data. {race_name=}')
-        broadcast_elements = soup.select('#broadcasts .race-list .race-list__item')
-        session_elements[tbd_race_idx] = next(iter(
-            x.text for x in broadcast_elements if re.search(r'INDYCAR.*Race|\nRace\s?', x.text, re.IGNORECASE)))
-    sessions = [parse_session(session_element, year) for session_element in session_elements]
-    cleaned_sessions = clean_sessions(race_name, sessions)
-    session_keys = set([x['session_key'] for x in cleaned_sessions])
-    if len(cleaned_sessions) != len(session_keys):
-        raise Exception(f'Duplicate session keys found for {race_name=}: {session_keys}')
-    transformed_sessions = transform_sessions(cleaned_sessions)
-    race_details = {
-        'name': race_name,
-        'sessions': transformed_sessions,
-        'tbc': is_tbd  # To be "confirmed" is used in output
-    }
-    return race_details
 
 
 def build_output(races: list) -> dict:
@@ -173,29 +26,148 @@ def build_output(races: list) -> dict:
     return output
 
 
-def get_indycar_schedule_old(year: int) -> dict:
-    schedule_url = SCHEDULE_URL_FORMAT.format(year=year)
-    schedule_html = get(schedule_url)
-    race_info_urls = parse_race_info_urls(schedule_html)
+def group_items(data: list[dict[str, str]]) -> list[list[dict[str, str]]]:
+    """Group adjacent items by id, title, and date."""
 
-    races = []
-    for race_info_url in race_info_urls:
-        print(f'Handling {race_info_url=}')
-        try:
-            race_info_html = get(race_info_url)
-            race_details = parse_race_details(race_info_html, year)
-            races += [race_details]
-        except Exception:
-            print(f'Exception while handling {race_info_url=}')
-            raise
-    indycar_schedule = build_output(races)
-    return indycar_schedule
+    def group_key(item: dict[str, str]):
+        """Group by id, title, and date."""
+        event_date = dateparser.parse(item['eventTime'], settings={'RETURN_AS_TIMEZONE_AWARE': True}).date()
+        return (item['id'], item['title'], event_date)
+
+    grouped = [list(group) for _, group in groupby(data, key=group_key)]
+    return grouped
+
+
+def build_sessions(items: list[dict[str, str]]) -> dict[str, str]:
+    sessions = {}
+    handled_indicies = []
+
+    # Handle practice
+    practice_items = [(idx, match, item) for idx, item in enumerate(items) if (
+        match := re.search(r'practice (\d+)', item['title'].lower()))]
+
+    for idx, match, item in practice_items:
+        key = f'practice{match[1]}'
+        if key in sessions.keys():
+            raise Exception(f'Multiple key matches for {key=}')
+        sessions[key] = item
+        handled_indicies.append(idx)
+
+    # Handle qualifying
+    qualifying_items = [(idx, match, item) for idx, item in enumerate(items) if (
+        match := re.search(r'quali.*', item['title'].lower()))]
+
+    for quali_num, (idx, match, item) in enumerate(qualifying_items, start=1):
+        # First qualiying has no number since typically there is only 1; however Indy500 has 2
+        key = 'qualifying' if quali_num == 1 else f'qualifying{quali_num}'
+        if key in sessions.keys():
+            raise Exception(f'Multiple key matches for {key=}')
+        sessions[key] = item
+        handled_indicies.append(idx)
+
+    # Handle warmup
+    key = 'warmup'
+    for idx, item in enumerate(items):
+        if re.search(r'warmup', item['title'].lower()):
+            if key in sessions.keys():
+                raise Exception(f'Multiple key matches for {key=}')
+            sessions[key] = item
+            handled_indicies.append(idx)
+
+    # Handle race
+    idx, race_item = next(iter((i, item) for i, item in enumerate(items) if item['id'] == 'race'))
+    sessions['race'] = race_item
+    handled_indicies.append(idx)
+
+    unhandled_items = [x for i, x in enumerate(items) if i not in handled_indicies]
+    for unhandled_item in unhandled_items:
+        print(f'Found unhandled item {json.dumps(unhandled_item)}')
+        unhandled_title = unhandled_item['title']
+        constructed_key = None
+        if 'practice' in unhandled_title.lower():
+            if practice_items:
+                # Determine unhandled practice item order
+                for i, (_, match, practice_item) in enumerate(practice_items):
+                    is_last_practice_item = i == len(practice_items) - 1
+                    practice_num = int(match[1])
+                    # Assuming already sorted by eventTime
+                    if unhandled_item['eventTime'] < practice_item['eventTime'] or is_last_practice_item:
+                        if practice_num > 1 or is_last_practice_item:
+                            # Construct the practice key by incrementing the previous practice number from title
+                            constructed_key = f'practice{practice_num + 1}'
+                            break
+                        # Use general handler if before practice 1 or if the constructed key exists
+            else:
+                constructed_key = 'practice1'
+
+        if constructed_key:
+            if constructed_key not in sessions.keys():
+                print(f"Constructing key from {unhandled_title=} -> {constructed_key=}")
+                sessions[constructed_key] = unhandled_item
+                continue
+            else:
+                print(f"Unable to use {constructed_key=} as it already exists. Using general title handler.")
+
+        # General unhandled item handler
+        # Extract words without spaces and make each title case
+        words = re.findall(r'[\w]+', unhandled_title)
+        constructed_key = ''.join([word.title() for word in words])
+        print(f'Using general unhandled item handler for {unhandled_title=} -> {constructed_key=}')
+        if constructed_key in sessions.keys():
+            raise Exception(f'Multiple key matches for {constructed_key=}')
+        sessions[constructed_key] = unhandled_item
+    print()
+    return sessions
+
+
+def get_race_details_from_matchup_url(event: dict[str, str], api_key: str) -> dict[str, str]:
+    event_for_print = dict(
+        (key, f'{val}?apikey={api_key}') if key == 'matchupUrl' else (key, val) for key, val in event.items() if (
+            key in ("id", "title", "webUrl", "matchupUrl"))
+    )
+    print(f'Handling: {json.dumps(event_for_print)}')
+    race_info = json.loads(get(event['matchupUrl'], {'apikey': api_key}, sleep=0.5))
+
+    # Add the sessions leading up to the race
+    schedule_items = race_info['eventSchedule']['scheduleItems']
+
+    # Handle cancelled sessions
+    cancelled_items = [x for x in schedule_items if 'cancelled' in x.get('subtitle', '').lower()]
+    if cancelled_items:
+        print(f'Skipping cancelled items: {json.dumps(cancelled_items)}')
+        schedule_items = [x for x in schedule_items if x not in cancelled_items]
+
+    # Sort schedule items by eventTime
+    schedule_items = sorted(schedule_items, key=lambda x: x['eventTime'])
+
+    # Group schedule items into a list of list of dict
+    grouped_items = group_items(schedule_items)
+
+    # Keep the first entry / earliest time of the grouped item(s)
+    first_items = [x[0] for x in grouped_items]
+
+    sessions = build_sessions(first_items)
+
+    # Map session key to timestamp only
+    sessions = dict((key, utc_dt_to_str(
+        dateparser.parse(val['eventTime'], settings={'RETURN_AS_TIMEZONE_AWARE': True}))
+    ) for key, val in sessions.items())
+
+    # Re-sort sessions by datetime as order may have changed during processing
+    sessions = dict(sorted(sessions.items(), key=lambda x: x[1]))
+
+    race_details = {
+        'name': event['title'],
+        'sessions': sessions,
+        'tbc': False
+    }
+    return race_details
 
 
 def get_race_details_from_data_url(event: dict[str, str], api_key: str) -> dict[str, str]:
     event_for_print = dict(
         (key, f'{val}?apikey={api_key}') if key == 'dataUrl' else (key, val) for key, val in event.items() if (
-            key in ("id", "title", "webUrl", "dataUrl"))
+            key in ('id', 'title', 'webUrl', 'dataUrl'))
     )
     print(f'Handling: {json.dumps(event_for_print)}')
     race_info = json.loads(get(event['dataUrl'], {'apikey': api_key}, sleep=0.5))
@@ -224,34 +196,6 @@ def get_race_details_from_data_url(event: dict[str, str], api_key: str) -> dict[
         'name': race_name,
         'sessions': sessions,
         'tbc': is_tba
-    }
-    return race_details
-
-
-def get_race_details_from_matchup_url(event: dict[str, str], api_key: str) -> dict[str, str]:
-    event_for_print = dict(
-        (key, f'{val}?apikey={api_key}') if key == 'matchupUrl' else (key, val) for key, val in event.items() if (
-            key in ("id", "title", "webUrl", "matchupUrl"))
-    )
-    print(f'Handling: {json.dumps(event_for_print)}')
-    race_info = json.loads(get(event['matchupUrl'], {'apikey': api_key}, sleep=0.5))
-
-    sessions = {}
-    # Add the sessions leading up to the race
-    for session in race_info['eventSchedule']['scheduleItems']:
-        # Map id to our desired key and fallback to use their session id
-        session_key = SESSION_ID_MAP.get(session['id'], session['id'])
-        sessions.update({
-            session_key: utc_dt_to_str(
-                dateparser.parse(session['eventTime'], settings={'RETURN_AS_TIMEZONE_AWARE': True}))
-        })
-    # Sort sessions by datetime
-    sessions = dict(sorted(sessions.items(), key=lambda x: x[1]))
-
-    race_details = {
-        'name': event['title'],
-        'sessions': sessions,
-        'tbc': False
     }
     return race_details
 
@@ -378,6 +322,7 @@ def get_indycar_schedule() -> dict:
             events.append(event)
 
     races = []
+    # TODO: Fetch all data first, write to file for easier debugging, and then process
     for event in events:
         # The dataUrl has been failing for later races
         # try:
@@ -393,7 +338,7 @@ def get_indycar_schedule() -> dict:
 
 def main(year: int = CURRENT_YEAR, output_path: str | Path = None) -> None:
     if year < 2025:
-        raise Exception(f"Use old_indycar_schedule.py for {year=}")
+        raise Exception(f'Use old_indycar_schedule.py for {year=}')
 
     if isinstance(output_path, str):
         output_path = Path(output_path)
@@ -409,8 +354,6 @@ def main(year: int = CURRENT_YEAR, output_path: str | Path = None) -> None:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--year', type=int, default=CURRENT_YEAR, help='schedule year')
-    parser.add_argument('--output_path', type=Path, default=DEFAULT_OUTPUT_PATH_FORMAT, help='json file path')
+    parser.add_argument('--output_path', type=Path, help='json file path')
     args = parser.parse_args()
-    if args.output_path == Path(DEFAULT_OUTPUT_PATH_FORMAT):
-        args.output_path = Path(DEFAULT_OUTPUT_PATH_FORMAT.format(year=args.year))
     main(**vars(args))
