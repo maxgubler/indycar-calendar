@@ -10,11 +10,11 @@ from github.AuthenticatedUser import AuthenticatedUser
 from github.Issue import Issue
 
 from constants import (AUTOMATION_BRANCH_NAME, COMMIT_MESSAGE, CURRENT_YEAR, DEFAULT_OUTPUT_PATH_FORMAT, GITHUB_API_KEY,
-                       LOCAL_REPO_PATH, LOCAL_REPO_SCHEDULE_DIR_PATH, PULL_REQUEST_BODY, SPORTSTIMES_F1_REPO_NAME,
-                       SPORTSTIMES_F1_REPO_URL)
+                       LOCAL_REPO_CONFIG_PATH, LOCAL_REPO_PATH, LOCAL_REPO_SCHEDULE_DIR_PATH, PULL_REQUEST_BODY,
+                       SPORTSTIMES_F1_REPO_NAME, SPORTSTIMES_F1_REPO_URL)
 from helpers import delete, write
 from indycar_schedule import get_indycar_schedule
-from update import update_schedule
+from update import update_config, update_schedule
 
 
 class AuthenticatedGithub(Github):
@@ -141,9 +141,19 @@ def update_sportstimes(source_path: Path):
 
     # Copy the updated schedule year json file into the repo
     local_repo_schedule_path = LOCAL_REPO_SCHEDULE_DIR_PATH.joinpath(source_path.name)
+
+    # Handle a new year if the schedule does not exist
+    if not local_repo_schedule_path.is_file():
+        print(f"No existing schedule found for '{local_repo_schedule_path}'. Updating config to include the year.")
+        update_config(file_path=LOCAL_REPO_CONFIG_PATH, year=int(source_path.stem))
+        # Add config file to stage for commit
+        relative_config_path = LOCAL_REPO_CONFIG_PATH.relative_to(LOCAL_REPO_PATH)
+        repo.index.add([relative_config_path])
+
+    # Complete copying the new schedule
     shutil.copy2(source_path, local_repo_schedule_path)
 
-    # Add file to stage for commit
+    # Add schedule file to stage for commit
     relative_schedule_path = local_repo_schedule_path.relative_to(LOCAL_REPO_PATH)
     repo.index.add([relative_schedule_path])
 

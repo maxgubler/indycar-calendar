@@ -1,4 +1,5 @@
 import argparse
+import base64
 import json
 import re
 from itertools import groupby
@@ -204,8 +205,14 @@ def get_indycar_schedule() -> dict:
     # Get API key
     events_html = get('https://www.foxsports.com/motor/indycar/events')
     soup = BeautifulSoup(events_html, 'html.parser')
-    fs_settings = soup.select_one('script[data-hid="fs-settings"]')
-    api_key = re.findall(r'"bifrost":[\w]?+{.*"apiKey":[\w]?+"([^"]+)"', fs_settings.text)[0]
+    fs_settings = soup.select_one('script[data-hid="fs-settings"]').text
+    if "apiKey" not in fs_settings:
+        if (fs_settings_match := re.search(r'"(.+)"', fs_settings)) and (
+                fs_settings_b64 := fs_settings_match.group(1)):
+            fs_settings = base64.b64decode(fs_settings_b64).decode()
+        else:
+            raise Exception(f"Unable to parse {fs_settings=}")
+    api_key = re.findall(r'"bifrost":[\w]?+{.*"apiKey":[\w]?+"([^"]+)"', fs_settings)[0]
     print(f'apikey={api_key}')
 
     # Structure

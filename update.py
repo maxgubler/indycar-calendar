@@ -10,6 +10,7 @@ from jsondiff import diff
 from constants import CURRENT_YEAR, DEBUG_NEW_SCHEDULE_PATH, DEFAULT_OUTPUT_PATH_FORMAT
 from helpers import read, write
 from indycar_schedule import get_indycar_schedule
+from indycar_schedule import main as indycar_schedule_main
 from old_indycar_schedule import get_indycar_schedule as get_indycar_schedule_old
 
 
@@ -85,6 +86,32 @@ def update_schedule(output_path: str | Path, year: int = CURRENT_YEAR) -> Path |
     return output_path
 
 
+def update_config(file_path: Path, year: int) -> None:
+    config = read(file_path)
+
+    # Update calendarOutputYear
+    calendar_output_year = config.get('calendarOutputYear')
+    if not calendar_output_year:
+        raise Exception(
+            f"Unable to find 'calendarOutputYear' in '{file_path}'. Ensure schema has not changed."
+        )
+    print(f"Updating config 'calendarOutputYear' from {calendar_output_year!r} to {year!r}")
+    config['calendarOutputYear'] = year
+
+    # Update availableYears
+    available_years = config.get('availableYears')
+    if not isinstance(available_years, list):
+        raise Exception(
+            f"Unable to handle 'availableYears' in '{file_path}'. Ensure schema has not changed."
+        )
+    new_available_years = sorted(set(available_years + [year]))
+    print(f"Updating config 'availableYears' from {available_years} to {new_available_years}")
+    config['availableYears'] = new_available_years
+
+    print(f"Writing updated '{file_path}'")
+    write(config, file_path)
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--year', type=int, default=CURRENT_YEAR, help='schedule year')
@@ -92,4 +119,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     if args.output_path == Path(DEFAULT_OUTPUT_PATH_FORMAT):
         args.output_path = Path(DEFAULT_OUTPUT_PATH_FORMAT.format(year=args.year))
-    update_schedule(**vars(args))
+    if args.output_path.is_file():
+        update_schedule(**vars(args))
+    else:
+        indycar_schedule_main(**vars(args))
