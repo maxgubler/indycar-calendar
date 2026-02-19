@@ -175,8 +175,8 @@ def get_race_details_from_data_url(event: dict[str, str], api_key: str) -> dict[
     race_name = race_info['header']['title']
 
     sessions = {}
-    # Add the sessions leading up to the race
-    for session in race_info['leaderboard']['leaderboardSections']:
+    # Add the sessions leading up to the race if this exists
+    for session in race_info.get('leaderboard', {}).get('leaderboardSections', []):
         # Map id to our desired key and fallback to use their session id
         session_key = SESSION_ID_MAP.get(session['id'], session['id'])
         sessions.update({
@@ -331,13 +331,13 @@ def get_indycar_schedule() -> dict:
     races = []
     # TODO: Fetch all data first, write to file for easier debugging, and then process
     for event in events:
-        # The dataUrl has been failing for later races
-        # try:
-        #     race_details = get_race_details_from_data_url(event, api_key)
-        # except Exception as e:
-        #     print(f'Exception while handling {event["dataUrl"]!r}: {e!r}')
-        #     print("Retrying with matchup url")
-        race_details = get_race_details_from_matchup_url(event, api_key)
+        try:
+            race_details = get_race_details_from_matchup_url(event, api_key)
+        except KeyError as e:
+            print(f"Exception handling {event['matchupUrl']}: {e!r}")
+            print("Retrying with data url")
+            # The dataUrl has stopped containing leaderboard with session info. Likely has race time only.
+            race_details = get_race_details_from_data_url(event, api_key)
         races += [race_details]
     indycar_schedule = build_output(races)
     return indycar_schedule
